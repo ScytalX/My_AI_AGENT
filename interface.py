@@ -6,7 +6,7 @@ import os
 st.set_page_config(page_title="Mon Super Prof IA", page_icon="👨‍🏫", layout="wide")
 
 # --- CONNEXION GEMINI ---
-os.environ["GOOGLE_API_KEY"] = "AIzaSyBJ00oYflxGr9pYveh_olokvLT_8YhGkt8"
+os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
 genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
 MODEL_NAME = "models/gemini-2.0-flash" # Utilise la version rapide
 
