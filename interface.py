@@ -8,7 +8,7 @@ st.set_page_config(page_title="Mon Super Prof IA", page_icon="👨‍🏫", layo
 # --- CONNEXION GEMINI ---
 os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
 genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
-MODEL_NAME = "gemini-2.0-flash" # Utilise la version rapide
+MODEL_NAME = "gemini-pro" # Utilise la version rapide
 
 # --- MÉMOIRE DE LA SESSION ---
 if "messages" not in st.session_state:
