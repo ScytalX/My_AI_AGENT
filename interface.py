@@ -1,3 +1,4 @@
+
 import streamlit as st
 import google.generativeai as genai
 import PyPDF2
@@ -15,7 +16,7 @@ except Exception:
     st.stop()
 
 # --- CHOIX DU MODÈLE (Basé sur tes captures d'écran) ---
-MODEL_NAME = "gemini-2.0-flash" 
+MODEL_NAME = "models/gemini-flash-latest" 
 
 # --- FONCTION : EXTRACTION PDF ---
 def get_pdf_text(uploaded_file):
@@ -57,7 +58,7 @@ with st.sidebar:
                 st.session_state.pdf_processed = True 
 
 # --- INTERFACE DE CHAT ---
-st.title("🎓 Assistant d'Études (Gemini 2.0)")
+st.title("🎓 Assistant d'Études prés à te servir")
 
 # Affichage des messages (on cache le texte brut du PDF pour la lisibilité)
 for msg in st.session_state.messages:
