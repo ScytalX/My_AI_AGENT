@@ -1,103 +1,138 @@
-
 import streamlit as st
-import google.generativeai as genai
 import PyPDF2
-import os
+from google.cloud import firestore
+from google.oauth2 import service_account
+import json
+import super_prof  # <--- On importe ton fichier Cerveau ici !
 
-# --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="Mon Super Prof IA", page_icon="🎓", layout="wide")
+# --- CONFIG PAGE ---
+st.set_page_config(page_title="Super Prof Multi-Agent", page_icon="🎓", layout="wide")
 
-# --- CONNEXION GEMINI ---
-try:
-    api_key = st.secrets["GOOGLE_API_KEY"]
-    genai.configure(api_key=api_key)
-except Exception:
-    st.error("⚠️ Clé API introuvable. Vérifie tes Secrets Streamlit.")
+# --- 1. SETUP BASE DE DONNÉES ---
+@st.cache_resource
+def get_db():
+    try:
+        if "gcp_service_account" in st.secrets:
+            key_dict = json.loads(st.secrets["gcp_service_account"]["textkey"])
+            creds = service_account.Credentials.from_service_account_info(key_dict)
+            return firestore.Client(credentials=creds, project=key_dict["project_id"])
+    except Exception as e:
+        st.error(f"Erreur DB: {e}")
+    return None
+
+db = get_db()
+
+# --- 2. AUTHENTIFICATION ---
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+with st.sidebar:
+    st.title("🔐 Connexion")
+    if not st.session_state.authenticated:
+        user = st.text_input("Pseudo").strip().lower()
+        pwd = st.text_input("Mot de passe", type="password")
+        if st.button("Se connecter"):
+            if user in st.secrets["passwords"] and st.secrets["passwords"][user] == pwd:
+                st.session_state.authenticated = True
+                st.session_state.username = user
+                st.rerun()
+            else:
+                st.error("Erreur d'identification")
+    else:
+        st.success(f"Connecté : {st.session_state.username}")
+        if st.button("Déconnexion"):
+            st.session_state.authenticated = False
+            st.rerun()
+
+if not st.session_state.authenticated:
+    st.info("Connecte-toi pour accéder à tes cours.")
     st.stop()
 
-# --- CHOIX DU MODÈLE (Basé sur tes captures d'écran) ---
-MODEL_NAME = "models/gemini-flash-latest" 
+# --- 3. LOGIQUE MÉMOIRE & NUMÉROTATION ---
+def save_msg(role, content):
+    if db:
+        db.collection("chat_history").add({
+            "username": st.session_state.username,
+            "role": role,
+            "content": content,
+            "timestamp": firestore.SERVER_TIMESTAMP
+        })
 
-# --- FONCTION : EXTRACTION PDF ---
-def get_pdf_text(uploaded_file):
-    text = ""
-    try:
-        reader = PyPDF2.PdfReader(uploaded_file)
-        for page in reader.pages:
-            text += page.extract_text()
-    except Exception as e:
-        return f"Erreur lecture PDF: {e}"
-    return text
-
-# --- MÉMOIRE DE LA SESSION ---
+# Initialisation des variables
 if "messages" not in st.session_state:
     st.session_state.messages = []
-    st.session_state.messages.append({
-        "role": "model", 
-        "content": "Salut ! Je suis prêt. Envoie un PDF pour commencer ou pose une question."
-    })
+if "plan_du_manager" not in st.session_state:
+    st.session_state.plan_du_manager = None
 
-# --- BARRE LATÉRALE (UPLOAD) ---
-with st.sidebar:
-    st.header("📂 Tes Cours")
-    uploaded_file = st.file_uploader("Charge ton PDF ici", type=["pdf"])
+# --- 4. INTERFACE UTILISATEUR ---
+st.title(f"🎓 Super Prof IA - Session de {st.session_state.username}")
+
+# A. UPLOAD PDF
+pdf_text = ""
+uploaded_file = st.file_uploader("📂 Dépose ton cours (PDF)", type="pdf")
+if uploaded_file:
+    reader = PyPDF2.PdfReader(uploaded_file)
+    for page in reader.pages:
+        pdf_text += page.extract_text()
+
+# B. L'IA MANAGER (Se lance au début)
+if not st.session_state.plan_du_manager:
+    st.info("👋 Bonjour ! Je suis l'IA Manager. Dis-moi ce que tu veux apprendre aujourd'hui.")
+    objectif = st.chat_input("Ex: Je veux maîtriser ce PDF pour mon examen...")
     
-    if st.button("🗑️ Reset"):
-        st.session_state.messages = []
-        st.rerun()
+    if objectif:
+        with st.spinner("Le Manager construit ton plan de travail..."):
+            # APPEL À TON FICHIER SUPER_PROF.PY
+            le_plan = super_prof.get_manager_plan(
+                st.secrets["GOOGLE_API_KEY"], 
+                objectif, 
+                pdf_text
+            )
+            st.session_state.plan_du_manager = le_plan
+            st.session_state.messages.append({"role": "assistant", "content": f"📋 **PLAN DU MANAGER :**\n\n{le_plan}"})
+            st.rerun()
 
-    # Traitement du PDF
-    if uploaded_file and "pdf_processed" not in st.session_state:
-        with st.spinner("Analyse du cours..."):
-            raw_text = get_pdf_text(uploaded_file)
-            if raw_text:
-                # On injecte le cours en contexte caché
-                prompt_context = f"Voici le cours de référence (PDF) :\n\n{raw_text}\n\nUtilise ce contenu pour répondre aux questions."
-                st.session_state.messages.append({"role": "user", "content": prompt_context})
-                st.session_state.messages.append({"role": "model", "content": "Document analysé ! Je t'écoute."})
-                st.session_state.pdf_processed = True 
+# C. L'IA PROFESSEUR (Chat principal)
+else:
+    # On affiche le plan en haut (dans un menu déroulant pour pas gêner)
+    with st.expander("Voir le Plan du Manager"):
+        st.write(st.session_state.plan_du_manager)
 
-# --- INTERFACE DE CHAT ---
-st.title("🎓 Assistant d'Études prés à te servir")
+    # Affichage du chat avec NUMÉROS
+    for i, msg in enumerate(st.session_state.messages):
+        with st.chat_message(msg["role"]):
+            # C'est ici qu'on ajoute les numéros visuels #1, #2...
+            st.markdown(f"**#{i+1}** : {msg['content']}")
 
-# Affichage des messages (on cache le texte brut du PDF pour la lisibilité)
-for msg in st.session_state.messages:
-    if msg["role"] == "user" and "Voici le cours de référence" in msg["content"]:
-        continue 
-    
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+    # Zone de question
+    if user_input := st.chat_input("Pose ta question au Professeur..."):
+        # 1. User
+        current_num = len(st.session_state.messages) + 1
+        with st.chat_message("user"):
+            st.markdown(f"**#{current_num}** : {user_input}")
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        save_msg("user", user_input)
 
-# Zone de saisie
-if prompt := st.chat_input("Pose ta question..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+        # 2. Préparation de l'historique pour l'IA (avec les numéros cachés dans le texte)
+        history_gemini = []
+        for i, m in enumerate(st.session_state.messages[:-1]): # On exclut le dernier msg qu'on vient d'ajouter
+            role_gemini = "user" if m["role"] == "user" else "model"
+            content_with_id = f"[Message #{i+1}] {m['content']}"
+            history_gemini.append({"role": role_gemini, "parts": [content_with_id]})
 
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        full_response = ""
-        
-        try:
-            model = genai.GenerativeModel(MODEL_NAME)
-            
-            # Préparation de l'historique pour l'API
-            history_gemini = []
-            for m in st.session_state.messages:
-                role = "model" if m["role"] == "assistant" or m["role"] == "model" else "user"
-                history_gemini.append({"role": role, "parts": [m["content"]]})
-            
-            # Génération
-            chat = model.start_chat(history=history_gemini[:-1])
-            response = chat.send_message(prompt, stream=True)
-            
-            for chunk in response:
-                if chunk.text:
-                    full_response += chunk.text
-                    message_placeholder.markdown(full_response + "▌")
-            
-            message_placeholder.markdown(full_response)
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
+        # 3. Réponse Professeur
+        with st.spinner("Le Professeur réfléchit..."):
+            # APPEL À TON FICHIER SUPER_PROF.PY
+            response = super_prof.get_professor_response(
+                st.secrets["GOOGLE_API_KEY"],
+                history_gemini,
+                f"[Message #{current_num}] {user_input}",
+                st.session_state.plan_du_manager
+            )
 
-        except Exception as e:
-            st.error(f"Erreur API : {e}")
+        # 4. Affichage IA
+        next_num = len(st.session_state.messages) + 1
+        with st.chat_message("assistant"):
+            st.markdown(f"**#{next_num}** : {response}")
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        save_msg("assistant", response)
