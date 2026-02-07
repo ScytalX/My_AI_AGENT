@@ -2,85 +2,84 @@ import streamlit as st
 import PyPDF2
 from google.cloud import firestore
 from google.oauth2 import service_account
-from google.api_core.exceptions import ResourceExhausted
+from google.api_core.exceptions import ResourceExhausted, NotFound
 import google.generativeai as genai
 import json
 import uuid
 import time
 
 # =========================================================
-# 🧠 PARTIE CERVEAU (LES IA) - INTÉGRÉE DIRECTEMENT ICI
+# 🧠 PARTIE CERVEAU (LES IA)
 # =========================================================
 
-# Fonction de sécurité (AIRBAG) pour éviter le ResourceExhausted
+# 🛑 JE N'AI PAS TOUCHÉ À CETTE VERSION COMME DEMANDÉ
+MODEL_NAME = "models/gemini-2.5-flash"
+
 def ask_gemini_safe(model, prompt, is_chat=False, chat_session=None):
-    """Essaie de générer. Si Google dit STOP, on attend et on réessaie."""
+    """Airbag anti-crash : attend si Google est surchargé"""
     try:
         if is_chat:
             return chat_session.send_message(prompt).text
         else:
             return model.generate_content(prompt).text
     except ResourceExhausted:
-        time.sleep(10) # On fait une pause de 10 secondes
+        time.sleep(10) # Pause de 10s
         try:
-            # On réessaie une fois
             if is_chat:
                 return chat_session.send_message(prompt).text
             else:
                 return model.generate_content(prompt).text
         except:
-            return "⚠️ Le système est surchargé. Attends 1 minute et réessaie."
+            return "⚠️ Surcharge système. Réessaie dans 1 minute."
+    except NotFound:
+        return f"⚠️ Erreur : Le modèle '{MODEL_NAME}' semble introuvable sur ce serveur. Vérifie s'il est disponible pour ta clé API."
 
 # 1. LE MANAGER
 def get_manager_plan(api_key, user_goal, pdf_text=""):
     genai.configure(api_key=api_key)
-    system_prompt = "Tu es le Manager Pédagogique. Analyse la demande et fais un plan d'apprentissage numéroté et structuré. Ne donne pas le cours."
-    model = genai.GenerativeModel("models/gemini-1.5-flash", system_instruction=system_prompt)
+    system_prompt = "Tu es le Manager Pédagogique. Fais un plan numéroté et structuré."
+    model = genai.GenerativeModel(MODEL_NAME, system_instruction=system_prompt)
     prompt = f"Objectif : {user_goal}\n\nContexte PDF : {pdf_text[:10000]}..." 
     return ask_gemini_safe(model, prompt)
 
 # 2. LE PROFESSEUR
 def get_professor_response(api_key, history, current_question, plan):
     genai.configure(api_key=api_key)
-    system_prompt = f"Tu es un Professeur Expert. Ton plan à suivre est : {plan}. Sois pédagogue, clair, et procède étape par étape."
-    model = genai.GenerativeModel("models/gemini-1.5-flash", system_instruction=system_prompt)
+    system_prompt = f"Tu es un Professeur Expert. Suis ce plan : {plan}. Sois pédagogue."
+    model = genai.GenerativeModel(MODEL_NAME, system_instruction=system_prompt)
     chat = model.start_chat(history=history)
     return ask_gemini_safe(model, current_question, is_chat=True, chat_session=chat)
 
 # 3. LE COACH
 def get_coach_advice(api_key, history):
     genai.configure(api_key=api_key)
-    system_prompt = "Tu es le Coach Mental. Analyse la conversation. Donne un conseil méthodologique (ex: Pomodoro) et une phrase de motivation choc. Sois bref."
-    model = genai.GenerativeModel("models/gemini-1.5-flash", system_instruction=system_prompt)
+    system_prompt = "Tu es le Coach Mental. Donne un conseil court et motivant."
+    model = genai.GenerativeModel(MODEL_NAME, system_instruction=system_prompt)
     chat = model.start_chat(history=history)
-    return ask_gemini_safe(model, "J'ai besoin de motivation.", is_chat=True, chat_session=chat)
+    return ask_gemini_safe(model, "Motive-moi.", is_chat=True, chat_session=chat)
 
 # 4. L'EXAMINATEUR
 def get_examiner_quiz(api_key, history):
     genai.configure(api_key=api_key)
-    system_prompt = "Tu es l'Examinateur. Pose 3 questions (QCM ou pièges) sur ce qui vient d'être dit pour vérifier la compréhension. Ne donne pas la réponse tout de suite."
-    model = genai.GenerativeModel("models/gemini-1.5-flash", system_instruction=system_prompt)
+    system_prompt = "Tu es l'Examinateur. Pose 3 questions pièges pour vérifier les acquis."
+    model = genai.GenerativeModel(MODEL_NAME, system_instruction=system_prompt)
     chat = model.start_chat(history=history)
-    return ask_gemini_safe(model, "Teste-moi maintenant.", is_chat=True, chat_session=chat)
+    return ask_gemini_safe(model, "Teste-moi.", is_chat=True, chat_session=chat)
 
 # 5. LE SCRIBE
 def get_scribe_summary(api_key, history, mode="fiche"):
     genai.configure(api_key=api_key)
-    if mode == "fusion":
-        system_prompt = "Tu es le Scribe. Fais un résumé dense de ce sous-module pour le dossier parent."
-    else:
-        system_prompt = "Tu es le Scribe. Crée une Fiche de Révision propre (Markdown) avec définitions et points clés."
-    
-    model = genai.GenerativeModel("models/gemini-1.5-flash", system_instruction=system_prompt)
+    inst = "Tu es le Scribe. Fais une fiche de révision claire (Markdown)." if mode != "fusion" else "Résume ce module pour le dossier parent."
+    model = genai.GenerativeModel(MODEL_NAME, system_instruction=inst)
     chat = model.start_chat(history=history)
-    return ask_gemini_safe(model, "Fais le résumé demandé.", is_chat=True, chat_session=chat)
+    return ask_gemini_safe(model, "Fais le résumé.", is_chat=True, chat_session=chat)
 
 
 # =========================================================
 # 🖥️ PARTIE INTERFACE (L'ÉCRAN)
 # =========================================================
 
-st.set_page_config(page_title="Super Prof - All in One", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="Super Prof", page_icon="🎓", layout="wide")
 
 # --- DATABASE ---
 @st.cache_resource
@@ -244,7 +243,6 @@ st.title(curr_info['title'])
 if st.session_state.get("trigger_fusion"):
     with st.spinner("Fusion en cours..."):
         hist = [{"role": ("user" if m["role"]=="user" else "model"), "parts": [m["content"]]} for m in st.session_state.messages]
-        # APPEL FONCTION INTERNE
         res = get_scribe_summary(st.secrets["GOOGLE_API_KEY"], hist, mode="fusion")
         save_msg(curr_info['parent_id'], "assistant", f"✅ **RÉSUMÉ {curr_info['title']}**\n{res}")
         st.session_state.current_session_id = curr_info['parent_id']
@@ -258,15 +256,12 @@ if st.session_state.get("special_trigger"):
     hist = [{"role": ("user" if m["role"]=="user" else "model"), "parts": [m["content"]]} for m in st.session_state.messages]
     with st.spinner(f"Appel {trig}..."):
         if trig == "quiz": 
-            # APPEL DIRECT
             r = get_examiner_quiz(st.secrets["GOOGLE_API_KEY"], hist)
             p = "😈 **EXAMINATEUR**"
         elif trig == "coach": 
-            # APPEL DIRECT
             r = get_coach_advice(st.secrets["GOOGLE_API_KEY"], hist)
             p = "📣 **COACH**"
         elif trig == "fiche": 
-            # APPEL DIRECT
             r = get_scribe_summary(st.secrets["GOOGLE_API_KEY"], hist, mode="fiche")
             p = "📝 **SCRIBE**"
             
@@ -294,14 +289,12 @@ if txt := st.chat_input("..."):
     # IA REPONSE
     if len(st.session_state.messages) <= 1 and not st.session_state.plan_du_manager and not curr_info.get("parent_id"):
         with st.spinner("Manager..."):
-            # APPEL DIRECT
             resp = get_manager_plan(st.secrets["GOOGLE_API_KEY"], txt, pdf_txt)
             st.session_state.plan_du_manager = resp
     else:
         with st.spinner("Professeur..."):
             h = [{"role": ("user" if m["role"]=="user" else "model"), "parts": [m["content"]]} for m in st.session_state.messages[:-1]]
             c = st.session_state.plan_du_manager if st.session_state.plan_du_manager else "Contexte libre"
-            # APPEL DIRECT
             resp = get_professor_response(st.secrets["GOOGLE_API_KEY"], h, txt, c)
             
     st.session_state.messages.append({"role": "assistant", "content": resp})
