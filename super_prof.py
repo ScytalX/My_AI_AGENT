@@ -1,42 +1,39 @@
 import google.generativeai as genai
 
+# --- 1. LE MANAGER (Architecte) ---
 def get_manager_plan(api_key, user_goal, pdf_text=""):
-    """Le Manager : Il structure le cours."""
     genai.configure(api_key=api_key)
-    
     system_prompt = """
     Tu es le Manager Pédagogique.
     TON RÔLE :
-    1. Analyse l'objectif de l'étudiant et le PDF fourni.
-    2. Découpe l'apprentissage en étapes claires et numérotées.
-    3. Donne une liste de chapitres à aborder.
-    4. Ne donne PAS le cours maintenant, fais juste le plan.
-    Sois directif et concis.
+    1. Analyse l'objectif et le PDF.
+    2. Découpe l'apprentissage en étapes numérotées.
+    3. Reste synthétique.
     """
-    
-    # On utilise le modèle Flash rapide et stable
     model = genai.GenerativeModel("models/gemini-2.5-flash", system_instruction=system_prompt)
-    
     prompt = f"Objectif : {user_goal}\n\nContexte PDF : {pdf_text[:10000]}..." 
-    response = model.generate_content(prompt)
-    return response.text
+    return model.generate_content(prompt).text
 
+# --- 2. LE PROFESSEUR (Pédagogue) ---
 def get_professor_response(api_key, history, current_question, plan):
-    """Le Professeur : Il explique le cours."""
     genai.configure(api_key=api_key)
-    
     system_prompt = f"""
     Tu es un Professeur Expert.
     Ton guide est ce plan : {plan}
-    
-    RÈGLES :
-    1. Réponds aux questions de l'étudiant.
-    2. Explique clairement, étape par étape.
-    3. Si l'étudiant dit "Ok" ou "Suivant", passe au point suivant du plan.
+    Explique clairement, étape par étape. Si l'étudiant pose une question sur un résumé de sous-dossier, intègre-le au cours.
     """
-    
     model = genai.GenerativeModel("models/gemini-2.5-flash", system_instruction=system_prompt)
-    
     chat = model.start_chat(history=history)
-    response = chat.send_message(current_question)
-    return response.text
+    return chat.send_message(current_question).text
+
+# --- 3. LE SCRIBE (Pour la fusion des dossiers) ---
+def get_merge_summary(api_key, history):
+    genai.configure(api_key=api_key)
+    system_prompt = """
+    Tu es le Scribe. Ton but est de résumer une sous-conversation pour le dossier parent.
+    Rédige un paragraphe concis qui commence par : "Dans ce sous-module, nous avons vu..."
+    Liste les points clés appris.
+    """
+    model = genai.GenerativeModel("models/gemini-2.5-flash", system_instruction=system_prompt)
+    chat = model.start_chat(history=history)
+    return chat.send_message("Fais le résumé de fusion maintenant.").text
