@@ -1,6 +1,25 @@
 import google.generativeai as genai
+import time
+from google.api_core.exceptions import ResourceExhausted
 
-# --- 1. LE MANAGER (Architecte) ---
+# --- FONCTION DE SÉCURITÉ (L'AIRBAG) ---
+def generate_safe(model, prompt, is_chat=False, chat_session=None):
+    """Essaie de générer une réponse. Si ça bloque, attend et réessaie."""
+    try:
+        if is_chat:
+            return chat_session.send_message(prompt).text
+        else:
+            return model.generate_content(prompt).text
+    except ResourceExhausted:
+        # C'est ici que l'Airbag se déclenche !
+        time.sleep(15) # On fait une pause de 15 secondes
+        # On réessaie une dernière fois
+        if is_chat:
+            return chat_session.send_message(prompt).text
+        else:
+            return model.generate_content(prompt).text
+
+# --- 1. LE MANAGER ---
 def get_manager_plan(api_key, user_goal, pdf_text=""):
     genai.configure(api_key=api_key)
     system_prompt = """
@@ -10,11 +29,14 @@ def get_manager_plan(api_key, user_goal, pdf_text=""):
     2. Découpe l'apprentissage en étapes numérotées.
     3. Reste synthétique. Ne donne pas le cours, fais le sommaire.
     """
-    model = genai.GenerativeModel("models/gemini-2.5-flash", system_instruction=system_prompt)
+    # Remets ici le modèle que tu veux (ex: gemini-2.5-flash ou 1.5-flash)
+    model = genai.GenerativeModel("models/gemini-1.5-flash", system_instruction=system_prompt)
     prompt = f"Objectif : {user_goal}\n\nContexte PDF : {pdf_text[:10000]}..." 
-    return model.generate_content(prompt).text
+    
+    # Appel sécurisé
+    return generate_safe(model, prompt)
 
-# --- 2. LE PROFESSEUR (Enseignant) ---
+# --- 2. LE PROFESSEUR ---
 def get_professor_response(api_key, history, current_question, plan):
     genai.configure(api_key=api_key)
     system_prompt = f"""
@@ -22,47 +44,46 @@ def get_professor_response(api_key, history, current_question, plan):
     Ton guide est ce plan : {plan}
     Explique clairement, étape par étape. Sois pédagogue et patient.
     """
-    model = genai.GenerativeModel("models/gemini-2.5-flash", system_instruction=system_prompt)
+    model = genai.GenerativeModel("models/gemini-1.5-flash", system_instruction=system_prompt)
     chat = model.start_chat(history=history)
-    return chat.send_message(current_question).text
+    
+    # Appel sécurisé
+    return generate_safe(model, current_question, is_chat=True, chat_session=chat)
 
-# --- 3. LE SCRIBE (Synthétiseur & Fusionneur) ---
+# --- 3. LE SCRIBE ---
 def get_scribe_summary(api_key, history, mode="fiche"):
     genai.configure(api_key=api_key)
     
     if mode == "fusion":
-        # Résumé pour le dossier parent
-        instruction = "Tu es le Scribe. Résume ce sous-module en un paragraphe dense pour informer le dossier parent de ce qui a été acquis."
+        instruction = "Tu es le Scribe. Résume ce sous-module pour le dossier parent."
     else:
-        # Fiche de révision pour l'élève
-        instruction = "Tu es le Scribe. Fais une Fiche de Révision claire (Markdown), avec définitions, formules et points clés."
+        instruction = "Tu es le Scribe. Fais une Fiche de Révision claire (Markdown)."
 
-    model = genai.GenerativeModel("models/gemini-2.5-flash", system_instruction=instruction)
+    model = genai.GenerativeModel("models/gemini-1.5-flash", system_instruction=instruction)
     chat = model.start_chat(history=history)
-    return chat.send_message("Fais le travail demandé sur la conversation ci-dessus.").text
+    
+    return generate_safe(model, "Fais le travail demandé.", is_chat=True, chat_session=chat)
 
-# --- 4. L'EXAMINATEUR (Testeur) ---
+# --- 4. L'EXAMINATEUR ---
 def get_examiner_quiz(api_key, history):
     genai.configure(api_key=api_key)
     system_prompt = """
-    Tu es l'Examinateur Piègeur.
-    Pose 3 questions (QCM ou Ouvertes) sur la conversation actuelle pour vérifier si l'étudiant a VRAIMENT compris.
-    Ne donne pas les réponses tout de suite. Attends sa réponse.
+    Tu es l'Examinateur.
+    Pose 3 questions pièges sur la conversation actuelle.
     """
-    model = genai.GenerativeModel("models/gemini-2.5-flash", system_instruction=system_prompt)
+    model = genai.GenerativeModel("models/gemini-1.5-flash", system_instruction=system_prompt)
     chat = model.start_chat(history=history)
-    return chat.send_message("Teste l'étudiant maintenant.").text
+    
+    return generate_safe(model, "Teste l'étudiant maintenant.", is_chat=True, chat_session=chat)
 
-# --- 5. LE COACH (Motivateur) ---
+# --- 5. LE COACH ---
 def get_coach_advice(api_key, history):
     genai.configure(api_key=api_key)
     system_prompt = """
     Tu es le Coach Mental.
-    Ton élève semble bloqué ou demande de l'aide.
-    1. Donne un conseil de méthodologie (ex: Pomodoro, Feynman).
-    2. Donne une phrase de motivation liée au sujet actuel.
-    Sois bref, énergique et tutorie l'élève.
+    Donne un conseil de méthodologie et une phrase de motivation.
     """
-    model = genai.GenerativeModel("models/gemini-2.5-flash", system_instruction=system_prompt)
+    model = genai.GenerativeModel("models/gemini-1.5-flash", system_instruction=system_prompt)
     chat = model.start_chat(history=history)
-    return chat.send_message("Donne-moi un conseil ou de la force.").text
+    
+    return generate_safe(model, "Donne-moi un conseil.", is_chat=True, chat_session=chat)
