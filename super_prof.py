@@ -16,7 +16,7 @@ def get_manager_plan(api_key, user_goal, pdf_text=""):
     Sois concis et directif.
     """
     
-    model = genai.GenerativeModel("gemini-2.0-flash", system_instruction=system_prompt)
+    model = genai.GenerativeModel("models/gemini-2.5-flash", system_instruction=system_prompt)
     
     prompt = f"Objectif de l'étudiant : {user_goal}\n\nContenu du PDF (si dispo) : {pdf_text[:5000]}..." # On coupe si trop long
     response = model.generate_content(prompt)
@@ -37,7 +37,7 @@ def get_professor_response(api_key, history_with_numbers, current_question, plan
     3. Ne balance pas tout le cours d'un coup, avance étape par étape.
     """
     
-    model = genai.GenerativeModel("gemini-2.0-flash", system_instruction=system_prompt)
+    model = genai.GenerativeModel("models/gemini-2.5-flash", system_instruction=system_prompt)
     
     # On envoie l'historique formaté
     chat = model.start_chat(history=history_with_numbers)
